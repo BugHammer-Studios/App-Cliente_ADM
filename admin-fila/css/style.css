@@ -26,8 +26,9 @@ body {
 
 /* topo */
 .topbar { display: flex; justify-content: space-between; align-items: flex-start; }
-.logo { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 22px; letter-spacing: -.3px; margin-left: auto; }
-.logo svg { width: 34px; height: 34px; }
+.logo { margin-left: auto; color: #fff; }
+.logo svg { display: block; height: 42px; width: auto; overflow: visible; }
+.logo text { fill: currentColor; font-family: "Nunito", system-ui, sans-serif; font-weight: 600; font-size: 30px; }
 h1 { font-size: 36px; font-weight: 700; margin: 6px 0 14px; letter-spacing: -.5px; }
 .sub { display: flex; align-items: center; justify-content: space-between; margin: -6px 0 14px; font-size: 14px; color: rgba(255,255,255,.75); }
 .link-btn { background: none; border: 0; color: rgba(255,255,255,.85); font: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; padding: 6px 0; }
