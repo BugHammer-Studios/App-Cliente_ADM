@@ -72,5 +72,6 @@ h1 { font-size: 36px; font-weight: 700; margin: 6px 0 14px; letter-spacing: -.5p
 .entrar[disabled] { opacity: .6; cursor: wait; }
 .erro { margin-top: 12px; color: #ffd2cf; font-size: 14px; min-height: 20px; }
 .demo-note { margin-top: 14px; font-size: 13px; color: rgba(255,255,255,.7); }
+.sucesso { margin-top: 12px; color: #c9f2d8; font-size: 14px; min-height: 20px; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

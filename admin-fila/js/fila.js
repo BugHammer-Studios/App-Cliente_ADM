@@ -2,8 +2,10 @@
   const A = window.APP;
   const $ = (id) => document.getElementById(id);
   const lista = $("lista"), contagem = $("contagem"), aviso = $("aviso");
+  const LABEL_FILA = { barbeiro1: "Barbeiro 1", barbeiro2: "Barbeiro 2", geral: "Fila geral" };
 
   let fb = null;
+  let parar = null;
   let itens = [];
   const abertos = new Set();
 
@@ -31,34 +33,75 @@
     return t || "Sem telefone";
   }
   function mostrarAviso(msg) { aviso.textContent = msg; aviso.hidden = !msg; }
-
+  
   /* ---------- ações ---------- */
   async function executar(fn, msgErro) {
     try { mostrarAviso(""); await fn(); }
-    catch (e) { console.error(e); mostrarAviso(msgErro); }
+    catch (e) { console.error(e); mostrarAviso(`${msgErro} (${e.code || e.message})`); }
   }
   const ref = (id) => fb.doc(fb.db, A.COLECAO, id);
+  const refPub = (id) => fb.doc(fb.db, A.COLECAO_PUBLICA || "posicoes", id);
 
+  /* O site do cliente lê "posicoes" (sem dados pessoais). Depois de agir na "fila",
+     espelhamos ali para o aparelho do cliente refletir a mudança. */
+  async function espelhar(id, acao) {
+    try {
+      if (acao === "chamado") await fb.updateDoc(refPub(id), { [A.CAMPO_STATUS]: "em_atendimento" });
+      else await fb.deleteDoc(refPub(id));
+    } catch (e) {
+      console.error(e);
+      mostrarAviso(`Feito na fila, mas o aparelho do cliente pode não atualizar (${e.code || e.message}).`);
+    }
+  }
+
+  /* CHAMAR: marca como "chamado" (continua na lista, com a etiqueta verde) */
   function chamar(id) {
     if (A.MODO_DEMO) { const c = itens.find((x) => x.id === id); if (c) c.status = "chamado"; return render(); }
-    return executar(
-      () => fb.updateDoc(ref(id), { [A.CAMPO_STATUS]: "chamado", chamadoEm: fb.serverTimestamp() }),
-      "Não foi possível chamar o cliente. Tente de novo.");
+    return executar(async () => {
+      await fb.updateDoc(ref(id), { [A.CAMPO_STATUS]: "chamado", chamadoEm: fb.serverTimestamp() });
+      await espelhar(id, "chamado");
+    }, "Não foi possível chamar o cliente. Tente de novo.");
   }
+
+  /* PULAR: marca como "pulado" (sai da lista; o documento fica guardado) */
   function pular(id, nome) {
     if (!confirm(`Pular ${nome} e tirar da fila?`)) return;
     abertos.delete(id);
     if (A.MODO_DEMO) { itens = itens.filter((x) => x.id !== id); return render(); }
-    executar(
-      () => fb.updateDoc(ref(id), { [A.CAMPO_STATUS]: "pulado", puladoEm: fb.serverTimestamp() }),
-      "Não foi possível pular o cliente. Tente de novo.");
+    executar(async () => {
+      await fb.updateDoc(ref(id), { [A.CAMPO_STATUS]: "pulado", puladoEm: fb.serverTimestamp() });
+      await espelhar(id, "remover");
+    }, "Não foi possível pular o cliente. Tente de novo.");
   }
+
+  /* X: apaga o documento de verdade */
   function remover(id, nome) {
     if (!confirm(`Remover ${nome} da fila?`)) return;
     abertos.delete(id);
     if (A.MODO_DEMO) { itens = itens.filter((x) => x.id !== id); return render(); }
-    executar(() => fb.deleteDoc(ref(id)), "Não foi possível remover o cliente. Tente de novo.");
+    executar(async () => {
+      await fb.deleteDoc(ref(id));
+      await espelhar(id, "remover");
+    }, "Não foi possível remover o cliente. Tente de novo.");
   }
+
+  /* POP (FIFO): remove o cadastro mais antigo, em transação */
+  async function chamarProxima() {
+    const s = await fb.getDocs(fb.query(fb.collection(fb.db, A.COLECAO), fb.orderBy(A.CAMPO_ORDEM, "asc")));
+    const d = s.docs.find((x) => x.data()[A.CAMPO_STATUS] !== "pulado");
+    if (!d) { mostrarAviso("Não existem pessoas aguardando na fila."); return; }
+    const apagou = await fb.runTransaction(fb.db, async (tx) => {
+      if (!(await tx.get(d.ref)).exists()) return false;
+      tx.delete(d.ref); return true;
+    });
+    if (!apagou) { mostrarAviso("A fila mudou durante a operação. Clique de novo."); return; }
+    await espelhar(d.id, "remover");
+  }
+
+  $("btnProxima").addEventListener("click", () => {
+    if (A.MODO_DEMO) { if (!itens.length) return mostrarAviso("Não existem pessoas aguardando na fila."); itens.shift(); return render(); }
+    executar(chamarProxima, "Não foi possível chamar a próxima pessoa. Tente de novo.");
+  });
 
   /* ---------- render ---------- */
   function render() {
@@ -81,7 +124,7 @@
         el("div", { class: "nome" }, nome),
         el("div", { class: "tel" }, formatarTel(c.telefone)));
       if (chamado) dados.append(el("span", { class: "tag ok" }, "Chamado"));
-      else if (c.barbeiro) dados.append(el("span", { class: "tag" }, c.barbeiro));
+      else if (c.barbeiro) dados.append(el("span", { class: "tag" }, LABEL_FILA[c.barbeiro] || c.barbeiro));
 
       const linha = el("button", {
         class: "linha", type: "button", "aria-expanded": String(aberto),
@@ -102,8 +145,8 @@
 
   /* ---------- fila em tempo real ---------- */
   function iniciarFila() {
-    const q = fb.query(fb.collection(fb.db, A.COLECAO), fb.orderBy(A.CAMPO_ORDEM, "asc"));
-    fb.onSnapshot(q, (snap) => {
+    const q = fb.query(fb.collection(fb.db, A.COLECAO), fb.orderBy(A.CAMPO_ORDEM, A.ORDEM_LISTA || "asc"));    
+    parar = fb.onSnapshot(q, (snap) => {
       mostrarAviso("");
       itens = snap.docs
         .map((d) => { const x = d.data(); return {
@@ -114,7 +157,9 @@
       render();
     }, (e) => {
       console.error(e);
-      mostrarAviso("Sem conexão com a fila. Confira as regras do Firestore e o nome da coleção.");
+      mostrarAviso(e.code === "permission-denied"
+        ? "Esta conta não tem permissão de administrador."
+        : "Sem conexão com a fila. Confira as regras do Firestore e o nome da coleção.");
     });
   }
 
@@ -128,10 +173,12 @@
 
   try { fb = await getFirebase(); }
   catch (e) { console.error(e); mostrarAviso("Não foi possível carregar o Firebase. Verifique a conexão."); return; }
-
+  
+  document.body.hidden = true;
   $("btnSair").addEventListener("click", () => fb.signOut(fb.auth));
   fb.onAuthStateChanged(fb.auth, (user) => {
-    if (!user) { location.href = "index.html"; return; }
+    if (!user || user.isAnonymous) { if (parar) parar(); location.href = "index.html"; return; }
+    document.body.hidden = false;
     iniciarFila();
   });
 })();
