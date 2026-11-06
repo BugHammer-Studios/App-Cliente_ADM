@@ -47,6 +47,7 @@
   async function espelhar(id, acao) {
     try {
       if (acao === "chamado") await fb.updateDoc(refPub(id), { [A.CAMPO_STATUS]: "em_atendimento" });
+      else if (acao === "aguardando") await fb.updateDoc(refPub(id), { [A.CAMPO_STATUS]: "aguardando" });
       else await fb.deleteDoc(refPub(id));
     } catch (e) {
       console.error(e);
@@ -61,6 +62,17 @@
       await fb.updateDoc(ref(id), { [A.CAMPO_STATUS]: "chamado", chamadoEm: fb.serverTimestamp() });
       await espelhar(id, "chamado");
     }, "Não foi possível chamar o cliente. Tente de novo.");
+  }
+
+  /* VOLTAR: desfaz o "Chamado", com confirmação. A pessoa volta a "aguardando"
+     e, como a lista é ordenada por criadoEm, retorna à posição original. */
+  function voltar(id, nome) {
+    if (!confirm(`Voltar ${nome} para a fila de espera?`)) return;
+    if (A.MODO_DEMO) { const c = itens.find((x) => x.id === id); if (c) c.status = "aguardando"; return render(); }
+    executar(async () => {
+      await fb.updateDoc(ref(id), { [A.CAMPO_STATUS]: "aguardando", chamadoEm: fb.deleteField() });
+      await espelhar(id, "aguardando");
+    }, "Não foi possível voltar o cliente para a fila. Tente de novo.");
   }
 
   /* PULAR: marca como "pulado" (sai da lista; o documento fica guardado) */
@@ -85,28 +97,45 @@
     }, "Não foi possível remover o cliente. Tente de novo.");
   }
 
-  /* POP (FIFO): remove o cadastro mais antigo, em transação */
-  async function chamarProxima() {
-    const s = await fb.getDocs(fb.query(fb.collection(fb.db, A.COLECAO), fb.orderBy(A.CAMPO_ORDEM, "asc")));
-    const d = s.docs.find((x) => x.data()[A.CAMPO_STATUS] !== "pulado");
-    if (!d) { mostrarAviso("Não existem pessoas aguardando na fila."); return; }
-    const apagou = await fb.runTransaction(fb.db, async (tx) => {
-      if (!(await tx.get(d.ref)).exists()) return false;
-      tx.delete(d.ref); return true;
-    });
-    if (!apagou) { mostrarAviso("A fila mudou durante a operação. Clique de novo."); return; }
-    await espelhar(d.id, "remover");
-  }
 
-  $("btnProxima").addEventListener("click", () => {
-    if (A.MODO_DEMO) { if (!itens.length) return mostrarAviso("Não existem pessoas aguardando na fila."); itens.shift(); return render(); }
-    executar(chamarProxima, "Não foi possível chamar a próxima pessoa. Tente de novo.");
-  });
 
   /* ---------- render ---------- */
+  function criarCard(c, pos) {
+    const nome = c.nome || "Sem nome";
+    const chamado = c.status === "chamado";
+    const aberto = abertos.has(c.id);
+
+    const dados = el("div", { class: "dados" },
+      el("div", { class: "nome" }, nome),
+      el("div", { class: "tel" }, formatarTel(c.telefone)));
+    if (chamado) dados.append(el("span", { class: "tag ok" }, "Chamado"));
+    else if (c.barbeiro) dados.append(el("span", { class: "tag" }, LABEL_FILA[c.barbeiro] || c.barbeiro));
+
+    const linha = el("button", {
+      class: "linha", type: "button", "aria-expanded": String(aberto),
+      onclick: () => { abertos.has(c.id) ? abertos.delete(c.id) : abertos.add(c.id); render(); }
+    }, svgUse("pessoa", "avatar"), dados, el("div", { class: "pos" }, chamado ? "✓" : `${pos}º`));
+
+    // Aguardando: botão "Chamar". Chamado: o mesmo lugar passa a ser "Voltar".
+    const btnPrincipal = chamado
+      ? el("button", { class: "acao pular", type: "button", onclick: () => voltar(c.id, nome) }, "Voltar")
+      : el("button", { class: "acao chamar", type: "button", onclick: () => chamar(c.id) }, "Chamar");
+    const btnPular = el("button", { class: "acao pular", type: "button", onclick: () => pular(c.id, nome) }, "Pular");
+
+    return el("li", { class: "item" + (chamado ? " chamado" : "") + (aberto ? " aberto" : "") },
+      linha,
+      el("button", { class: "x", type: "button", "aria-label": `Remover ${nome}`, onclick: () => remover(c.id, nome) }, "×"),
+      el("div", { class: "acoes" }, btnPrincipal, btnPular));
+  }
+
   function render() {
     lista.replaceChildren();
-    contagem.textContent = itens.length === 1 ? "1 cliente na fila" : `${itens.length} clientes na fila`;
+    // Quem não é "chamado" (inclui cadastros antigos sem status) conta como aguardando.
+    // O filter mantém a ordem da consulta (criadoEm), então cada grupo fica em ordem de entrada.
+    const chamados = itens.filter((c) => c.status === "chamado");
+    const aguardando = itens.filter((c) => c.status !== "chamado");
+
+    contagem.textContent = `${aguardando.length} aguardando · ${chamados.length} chamado${chamados.length === 1 ? "" : "s"}`;
 
     if (!itens.length) {
       lista.append(el("li", { class: "vazio" },
@@ -115,32 +144,14 @@
       return;
     }
 
-    itens.forEach((c, i) => {
-      const nome = c.nome || "Sem nome";
-      const chamado = c.status === "chamado";
-      const aberto = abertos.has(c.id);
-
-      const dados = el("div", { class: "dados" },
-        el("div", { class: "nome" }, nome),
-        el("div", { class: "tel" }, formatarTel(c.telefone)));
-      if (chamado) dados.append(el("span", { class: "tag ok" }, "Chamado"));
-      else if (c.barbeiro) dados.append(el("span", { class: "tag" }, LABEL_FILA[c.barbeiro] || c.barbeiro));
-
-      const linha = el("button", {
-        class: "linha", type: "button", "aria-expanded": String(aberto),
-        onclick: () => { abertos.has(c.id) ? abertos.delete(c.id) : abertos.add(c.id); render(); }
-      }, svgUse("pessoa", "avatar"), dados, el("div", { class: "pos" }, `${i + 1}º`));
-
-      const btnChamar = el("button", { class: "acao chamar", type: "button", onclick: () => chamar(c.id) },
-        chamado ? "Chamado" : "Chamar");
-      if (chamado) btnChamar.disabled = true;
-      const btnPular = el("button", { class: "acao pular", type: "button", onclick: () => pular(c.id, nome) }, "Pular");
-
-      lista.append(el("li", { class: "item" + (chamado ? " chamado" : "") + (aberto ? " aberto" : "") },
-        linha,
-        el("button", { class: "x", type: "button", "aria-label": `Remover ${nome}`, onclick: () => remover(c.id, nome) }, "×"),
-        el("div", { class: "acoes" }, btnChamar, btnPular)));
-    });
+    if (chamados.length) {
+      lista.append(el("li", { class: "grupo" }, `Chamados (${chamados.length})`));
+      chamados.forEach((c) => lista.append(criarCard(c, null)));
+    }
+    if (aguardando.length) {
+      lista.append(el("li", { class: "grupo" }, `Aguardando (${aguardando.length})`));
+      aguardando.forEach((c, i) => lista.append(criarCard(c, i + 1)));
+    }
   }
 
   /* ---------- fila em tempo real ---------- */

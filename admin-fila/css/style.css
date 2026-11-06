@@ -73,5 +73,7 @@ h1 { font-size: 36px; font-weight: 700; margin: 6px 0 14px; letter-spacing: -.5p
 .erro { margin-top: 12px; color: #ffd2cf; font-size: 14px; min-height: 20px; }
 .demo-note { margin-top: 14px; font-size: 13px; color: rgba(255,255,255,.7); }
 .sucesso { margin-top: 12px; color: #c9f2d8; font-size: 14px; min-height: 20px; }
+/* títulos dos grupos da lista */
+.grupo { font-size: 13px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: rgba(255,255,255,.75); margin: 6px 2px 0; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
