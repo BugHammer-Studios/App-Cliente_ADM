@@ -3,6 +3,10 @@
   const $ = (id) => document.getElementById(id);
   const lista = $("lista"), contagem = $("contagem"), aviso = $("aviso");
   const LABEL_FILA = { barbeiro1: "Barbeiro 1", barbeiro2: "Barbeiro 2", geral: "Fila geral" };
+  // Qual barbeiro foi escolhido na tela anterior (?barbeiro=barbeiro1|barbeiro2)
+  const PERFIL = new URLSearchParams(location.search).get("barbeiro");
+  if (PERFIL !== "barbeiro1" && PERFIL !== "barbeiro2") { location.href = "perfil.html"; return; }
+  $("titulo").textContent = LABEL_FILA[PERFIL];
 
   let fb = null;
   let parar = null;
@@ -44,10 +48,14 @@
 
   /* O site do cliente lê "posicoes" (sem dados pessoais). Depois de agir na "fila",
      espelhamos ali para o aparelho do cliente refletir a mudança. */
-  async function espelhar(id, acao) {
+  async function espelhar(id, acao, por) {
     try {
-      if (acao === "chamado") await fb.updateDoc(refPub(id), { [A.CAMPO_STATUS]: "em_atendimento" });
-      else if (acao === "aguardando") await fb.updateDoc(refPub(id), { [A.CAMPO_STATUS]: "aguardando" });
+      if (acao === "chamado") {
+        const d = { [A.CAMPO_STATUS]: "em_atendimento" };
+        if (por) d.chamadoPor = por;
+        await fb.updateDoc(refPub(id), d);
+      }
+      else if (acao === "aguardando") await fb.updateDoc(refPub(id), { [A.CAMPO_STATUS]: "aguardando", chamadoPor: fb.deleteField() });
       else await fb.deleteDoc(refPub(id));
     } catch (e) {
       console.error(e);
@@ -59,8 +67,8 @@
   function chamar(id) {
     if (A.MODO_DEMO) { const c = itens.find((x) => x.id === id); if (c) c.status = "chamado"; return render(); }
     return executar(async () => {
-      await fb.updateDoc(ref(id), { [A.CAMPO_STATUS]: "chamado", chamadoEm: fb.serverTimestamp() });
-      await espelhar(id, "chamado");
+      await fb.updateDoc(ref(id), { [A.CAMPO_STATUS]: "chamado", chamadoEm: fb.serverTimestamp(), chamadoPor: PERFIL });
+      await espelhar(id, "chamado", PERFIL);
     }, "Não foi possível chamar o cliente. Tente de novo.");
   }
 
@@ -70,7 +78,7 @@
     if (!confirm(`Voltar ${nome} para a fila de espera?`)) return;
     if (A.MODO_DEMO) { const c = itens.find((x) => x.id === id); if (c) c.status = "aguardando"; return render(); }
     executar(async () => {
-      await fb.updateDoc(ref(id), { [A.CAMPO_STATUS]: "aguardando", chamadoEm: fb.deleteField() });
+      await fb.updateDoc(ref(id), { [A.CAMPO_STATUS]: "aguardando", chamadoEm: fb.deleteField(), chamadoPor: fb.deleteField() });
       await espelhar(id, "aguardando");
     }, "Não foi possível voltar o cliente para a fila. Tente de novo.");
   }
@@ -108,7 +116,8 @@
     const dados = el("div", { class: "dados" },
       el("div", { class: "nome" }, nome),
       el("div", { class: "tel" }, formatarTel(c.telefone)));
-    if (chamado) dados.append(el("span", { class: "tag ok" }, "Chamado"));
+    if (chamado) dados.append(el("span", { class: "tag ok" },
+      "Chamado" + (c.chamadoPor ? ` · ${LABEL_FILA[c.chamadoPor] || c.chamadoPor}` : "")));
     else if (c.barbeiro) dados.append(el("span", { class: "tag" }, LABEL_FILA[c.barbeiro] || c.barbeiro));
 
     const linha = el("button", {
@@ -134,7 +143,7 @@
     // O filter mantém a ordem da consulta (criadoEm), então cada grupo fica em ordem de entrada.
     const chamados = itens.filter((c) => c.status === "chamado");
     const aguardando = itens.filter((c) => c.status !== "chamado");
-
+      
     contagem.textContent = `${aguardando.length} aguardando · ${chamados.length} chamado${chamados.length === 1 ? "" : "s"}`;
 
     if (!itens.length) {
@@ -156,15 +165,23 @@
 
   /* ---------- fila em tempo real ---------- */
   function iniciarFila() {
-    const q = fb.query(fb.collection(fb.db, A.COLECAO), fb.orderBy(A.CAMPO_ORDEM, A.ORDEM_LISTA || "asc"));    
+    // Só a fila do barbeiro escolhido + a fila geral
+    const q = fb.query(fb.collection(fb.db, A.COLECAO),
+      fb.where(A.CAMPO_BARBEIRO, "in", [PERFIL, "geral"]));
     parar = fb.onSnapshot(q, (snap) => {
       mostrarAviso("");
       itens = snap.docs
-        .map((d) => { const x = d.data(); return {
-          id: d.id,
-          nome: x[A.CAMPO_NOME], telefone: x[A.CAMPO_TELEFONE], barbeiro: x[A.CAMPO_BARBEIRO], status: x[A.CAMPO_STATUS]
-        }; })
-        .filter((c) => c.status !== "pulado");
+        .map((d) => {
+          const x = d.data({ serverTimestamps: "estimate" });
+          return {
+            id: d.id,
+            nome: x[A.CAMPO_NOME], telefone: x[A.CAMPO_TELEFONE], barbeiro: x[A.CAMPO_BARBEIRO], status: x[A.CAMPO_STATUS],
+            chamadoPor: x.chamadoPor,
+            ordem: x[A.CAMPO_ORDEM] ? x[A.CAMPO_ORDEM].toMillis() : Date.now()
+          };
+        })
+        .filter((c) => c.status !== "pulado")
+        .sort((a, b) => a.ordem - b.ordem);   // ordem de chegada
       render();
     }, (e) => {
       console.error(e);

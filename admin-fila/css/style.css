@@ -76,4 +76,22 @@ h1 { font-size: 36px; font-weight: 700; margin: 6px 0 14px; letter-spacing: -.5p
 /* títulos dos grupos da lista */
 .grupo { font-size: 13px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: rgba(255,255,255,.75); margin: 6px 2px 0; }
 
+/* cards de escolha do barbeiro: verticais, com ícone */
+.cards2 { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 22px; }
+.pcard { display: flex; align-items: center; gap: 14px; min-height: 76px; padding: 14px 16px; border-radius: var(--radius); background: #fff; color: var(--ink); text-decoration: none; box-shadow: 0 2px 0 rgba(0,0,0,.12); transition: transform .15s; }
+.pcard .avatar { width: 46px; height: 46px; flex: none; }
+.pcard .ptxt { flex: 1; min-width: 0; line-height: 1.2; }
+.pcard strong { display: block; font-size: 18px; }
+.pcard .ptxt span { font-size: 13px; color: var(--ink-soft); }
+.pcard .seta { font-size: 30px; line-height: 1; color: var(--ink-soft); }
+.pcard:hover { transform: translateY(-1px); }
+.pcard:active { transform: translateY(1px); }
+.pcard:focus-visible { outline: 3px solid #8fb4ff; outline-offset: 2px; }
+
+/* botão Sair */
+.btn-sair { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; border: 1.5px solid rgba(255,255,255,.4); border-radius: 12px; background: rgba(255,255,255,.08); color: #fff; font: inherit; font-weight: 700; font-size: 15px; cursor: pointer; transition: background .2s; }
+.btn-sair svg { width: 20px; height: 20px; }
+.btn-sair:hover { background: rgba(255,255,255,.18); }
+.btn-sair:focus-visible { outline: 3px solid #8fb4ff; outline-offset: 2px; }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
